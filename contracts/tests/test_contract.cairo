@@ -1,47 +1,99 @@
+use snforge_std::DeclareResultTrait;
+use snforge_std::{declare, ContractClassTrait, start_cheat_caller_address};
+use contracts::contract::interface::{IHelloStarkChanDispatcher,IHelloStarkChanDispatcherTrait};
 use starknet::ContractAddress;
+use core::poseidon::PoseidonTrait;
+use core::hash::{HashStateTrait, HashStateExTrait};
 
-use snforge_std::{declare, ContractClassTrait, DeclareResultTrait};
-
-use contracts::IHelloStarknetSafeDispatcher;
-use contracts::IHelloStarknetSafeDispatcherTrait;
-use contracts::IHelloStarknetDispatcher;
-use contracts::IHelloStarknetDispatcherTrait;
-
-fn deploy_contract(name: ByteArray) -> ContractAddress {
-    let contract = declare(name).unwrap().contract_class();
-    let (contract_address, _) = contract.deploy(@ArrayTrait::new()).unwrap();
-    contract_address
+// Replicate contract's hash structure in test
+#[derive(Drop, Hash)]
+struct TestHashStruct {
+    first: usize,
+    second: u8
+}
+fn deploy_contract() -> ContractAddress {
+    let contract = declare("HelloStarkChan").unwrap().contract_class();
+    let (address, _) = contract.deploy(@array![]).unwrap();
+    address
 }
 
 #[test]
-fn test_increase_balance() {
-    let contract_address = deploy_contract("HelloStarknet");
-
-    let dispatcher = IHelloStarknetDispatcher { contract_address };
-
-    let balance_before = dispatcher.get_balance();
-    assert(balance_before == 0, 'Invalid balance');
-
-    dispatcher.increase_balance(42);
-
-    let balance_after = dispatcher.get_balance();
-    assert(balance_after == 42, 'Invalid balance');
+fn test_constructor() {
+    let address = deploy_contract();
+    let dispatcher = IHelloStarkChanDispatcher { contract_address: address };
+    assert!(dispatcher.get_id() == 4649, "ID mismatch");
 }
 
 #[test]
-#[feature("safe_dispatcher")]
-fn test_cannot_increase_balance_with_zero_value() {
-    let contract_address = deploy_contract("HelloStarknet");
+fn test_valid_cup_guess() {
+    let address = deploy_contract();
+    let dispatcher = IHelloStarkChanDispatcher { contract_address: address };
+    
+    // Get correct hash through contract function
+    let correct_hash = dispatcher.get_cup_hash();
+    let caller: ContractAddress = 123.try_into().unwrap();
+    
+    start_cheat_caller_address(address, caller);
+    dispatcher.verify_cup_size_with_hash(correct_hash);
+    assert!(dispatcher.is_winner(), "Should be winner after correct hash guess");
+}
 
-    let safe_dispatcher = IHelloStarknetSafeDispatcher { contract_address };
+#[test]
+#[should_panic(expected: "Wrong input")]
+fn test_invalid_cup_guess() {
+    let address = deploy_contract();
+    let dispatcher = IHelloStarkChanDispatcher { contract_address: address };
+    dispatcher.verify_cup_size_with_cup(9); // Below valid range
+}
 
-    let balance_before = safe_dispatcher.get_balance().unwrap();
-    assert(balance_before == 0, 'Invalid balance');
+#[test]
+fn test_hash_verification() {
+    let address = deploy_contract();
+    let dispatcher = IHelloStarkChanDispatcher { contract_address: address };
+    
+    // Generate valid hash for verification
+    let correct_hash = dispatcher.get_cup_hash();
+    dispatcher.verify_cup_size_with_hash(correct_hash);
+    assert!(dispatcher.is_winner(), "Caller should be marked as winner");
+}
 
-    match safe_dispatcher.increase_balance(0) {
-        Result::Ok(_) => core::panic_with_felt252('Should have panicked'),
-        Result::Err(panic_data) => {
-            assert(*panic_data.at(0) == 'Amount cannot be 0', *panic_data.at(0));
+#[test]
+#[should_panic(expected: "Wrong input")]
+fn test_invalid_hash() {
+    let address = deploy_contract();
+    let dispatcher = IHelloStarkChanDispatcher { contract_address: address };
+    dispatcher.verify_cup_size_with_hash(12345.try_into().unwrap());
+}
+
+#[test]
+fn test_randomization_range() {
+
+
+    let contract_address = deploy_contract();
+    let dispatcher = IHelloStarkChanDispatcher { contract_address };
+    let cup_hash = dispatcher.get_cup_hash();
+
+    let mut valid_count = 0;
+    let mut cup_size: u8 = 10;
+    
+    // Cairo-compatible while loop
+    while cup_size <= 15 {
+        let hash_struct = TestHashStruct {
+            first: 4649,
+            second: cup_size
+        };
+        
+        let test_hash = PoseidonTrait::new();
+
+        let test_hash = test_hash            
+            .update_with(hash_struct)
+            .finalize();
+        if test_hash == cup_hash {
+            valid_count += 1;
         }
+        
+        cup_size += 1;
     };
+    
+    assert!(valid_count == 1, "Should have exactly one valid cup size");
 }
