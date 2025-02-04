@@ -1,5 +1,7 @@
 node_modules
-
+Scarb.lock
+.git_ignore
+target
 # Output
 .output
 .vercel
