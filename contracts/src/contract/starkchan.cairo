@@ -51,6 +51,11 @@ mod HelloStarkChan {
         fn get_id(self: @ContractState) -> usize {
             self.id.read()
         }
+        fn poseidon_hash(ref self: ContractState, id: usize, cup_size: u8) -> felt252 {
+            let input = HashStruct { first: id, second: cup_size };
+            PoseidonTrait::new().update_with(input).finalize()
+        }
+        
 
         fn verify_cup_size_with_cup(ref self: ContractState, input: u8) {
             
@@ -71,7 +76,6 @@ mod HelloStarkChan {
             let caller = get_caller_address();
             self.winners.entry(caller).write(true);
         }
-
 
     fn is_winner(ref self: ContractState) -> bool {
         self.winners.entry(get_caller_address()).read()
