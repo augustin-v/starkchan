@@ -73,11 +73,6 @@ mod HelloStarkChan {
         }
 
 
-
-    fn get_cup_hash(self: @ContractState) ->felt252 {
-        self.cup_hash.read()
-    }
-
     fn is_winner(ref self: ContractState) -> bool {
         self.winners.entry(get_caller_address()).read()
     }
