@@ -1,0 +1,5 @@
+elevenlabs
+langchain-community
+pandas==1.5.3
+protobuf==3.20.3
+tensorflow==2.14.0

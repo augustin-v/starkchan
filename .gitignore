@@ -1,4 +1,7 @@
+agentic
+
 node_modules
+*.log
 Scarb.lock
 .git_ignore
 target

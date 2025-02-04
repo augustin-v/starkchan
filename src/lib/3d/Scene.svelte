@@ -2,7 +2,7 @@
     import { onMount } from 'svelte';
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
     import { FirstPersonControls } from 'three/addons/controls/FirstPersonControls.js'
     import { Clock } from 'three';
 
@@ -88,6 +88,7 @@
         window.removeEventListener('resize', handleResize);
       };
     });
+
     </script>
     
     <div bind:this={container}></div>
