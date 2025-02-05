@@ -1,102 +1,132 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
-    import * as THREE from 'three';
-    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+	import { onMount } from 'svelte';
+	import * as THREE from 'three';
+	import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+	import { FirstPersonControls } from 'three/addons/controls/FirstPersonControls.js';
+	import { Clock, Vector2 } from 'three';
+	import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+	import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+	import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
-    import { FirstPersonControls } from 'three/addons/controls/FirstPersonControls.js'
-    import { Clock } from 'three';
+	let container: HTMLElement;
 
-    let container: HTMLElement;
-    
-    onMount(() => {
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
-      const clock = new Clock();
+	onMount(() => {
+		// ----- Scene Setup -----
+		const scene = new THREE.Scene();
+		scene.fog = new THREE.Fog(0x1a1a1a, 10, 50);
 
-      camera.position.set(0, 1.6, 5);
-      camera.lookAt(0, 1.6, 0);
-      // Add lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-      scene.add(ambientLight);
-      
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-      directionalLight.position.set(5, 5, 5);
-      scene.add(directionalLight);
-    
-      const groundGeometry = new THREE.PlaneGeometry(100, 100);
-      const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
-      const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-      ground.rotation.x = -Math.PI / 2;
-      ground.position.y = -2;
-      scene.add(ground);
+		const camera = new THREE.PerspectiveCamera(
+			75,
+			window.innerWidth / window.innerHeight,
+			0.1,
+			1000
+		);
+		// Position camera inside the classroom. Adjust as needed.
+		camera.position.set(0, 1.6, 5);
+		camera.lookAt(0, 1.6, 0);
 
+		const renderer = new THREE.WebGLRenderer({ antialias: true });
+		renderer.setSize(window.innerWidth, window.innerHeight);
+		renderer.setClearColor(0x1a1a1a);
+		container.appendChild(renderer.domElement);
 
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setClearColor(0x1a1a1a); // Dark gray background
-      container.appendChild(renderer.domElement);
-    
-      const controls = new FirstPersonControls(camera, renderer.domElement);
-        controls.movementSpeed = 5;
-        controls.lookSpeed = 0.1;
-        controls.lookVertical = true;
-        controls.constrainVertical = true;
-        controls.verticalMin = 1.0;
-        controls.verticalMax = 2.0;
+		// ----- Lighting -----
+		const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+		scene.add(ambientLight);
 
+		const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+		directionalLight.position.set(5, 10, 7.5);
+		scene.add(directionalLight);
 
-      
-      // Load avatar
-      const loader = new GLTFLoader();
-      loader.load(
-            'starkchanmodel.glb',
-            (gltf) => {
-                const model = gltf.scene;
-                model.position.set(0, 0, 0);
-                model.scale.set(1, 1, 1);
-                scene.add(model);
+		const loader = new GLTFLoader();
 
-                // Updated animation loop with proper delta time
-                const animate = () => {
-                    requestAnimationFrame(animate);
-                    const delta = clock.getDelta();
-                    controls.update(delta); // Pass the delta time
-                    renderer.render(scene, camera);
-                };
-                animate();
-        },
-        // Loading progress
-        (xhr) => {
-          console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-        },
-        // Error handling
-        (error) => {
-          console.error('An error occurred loading the model:', error);
-        }
-      );
-    
-      // Handle window resize
-      const handleResize = () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      };
-      
-      window.addEventListener('resize', handleResize);
-    
-      return () => {
-        window.removeEventListener('resize', handleResize);
-      };
-    });
+		// ----- Load Japanese Classroom Environment -----
+		loader.load(
+			'japanese_classroom.glb',
+			(gltf) => {
+				const environment = gltf.scene;
+				// Optionally, adjust environment’s scale/position if needed:
+				environment.position.set(0, 0, 10);
+				scene.add(environment);
+			},
+			(xhr) => {
+				console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+			},
+			(error) => {
+				console.error('Error loading Japanese classroom scene:', error);
+			}
+		);
 
-    </script>
-    
-    <div bind:this={container}></div>
-    
-    <style>
-    div {
-      width: 100%;
-      height: 100%;
-    }
-    </style>
-    
+		// ----- Load the Avatar Model (Stark-chan) -----
+		loader.load(
+			'starkchanmodel.glb',
+			(gltf) => {
+				const starkchan = gltf.scene;
+				// Adjust Stark-chan’s position as needed so that she’s inside the classroom.
+				starkchan.position.set(0, 0, 7);
+				starkchan.scale.set(1, 1, 1);
+				scene.add(starkchan);
+			},
+			(xhr) => {
+				console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+			},
+			(error) => {
+				console.error('Error loading Stark-chan model:', error);
+			}
+		);
+
+		// ----- Post-Processing: Bloom for Neon Glow (Optional) -----
+		const composer = new EffectComposer(renderer);
+		const renderPass = new RenderPass(scene, camera);
+		composer.addPass(renderPass);
+
+		const bloomPass = new UnrealBloomPass(
+			new Vector2(window.innerWidth, window.innerHeight),
+			1.5, // strength
+			0.4, // radius
+			0.85 // threshold
+		);
+		composer.addPass(bloomPass);
+
+		// ----- First-Person Controls -----
+		const controls = new FirstPersonControls(camera, renderer.domElement);
+		controls.movementSpeed = 5;
+		controls.lookSpeed = 0.1;
+		controls.lookVertical = true;
+		controls.constrainVertical = true;
+		controls.verticalMin = 1.0;
+		controls.verticalMax = 2.0;
+
+		// ----- Animation Loop -----
+		const clock = new Clock();
+		const animate = () => {
+			requestAnimationFrame(animate);
+			const delta = clock.getDelta();
+			controls.update(delta);
+			composer.render(delta);
+		};
+		animate();
+
+		// ----- Handle Window Resize -----
+		const handleResize = () => {
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+			renderer.setSize(window.innerWidth, window.innerHeight);
+			composer.setSize(window.innerWidth, window.innerHeight);
+		};
+
+		window.addEventListener('resize', handleResize);
+		return () => {
+			window.removeEventListener('resize', handleResize);
+		};
+	});
+</script>
+
+<div bind:this={container}></div>
+
+<style>
+	div {
+		width: 100%;
+		height: 100%;
+	}
+</style>
