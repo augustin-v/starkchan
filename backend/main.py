@@ -1,21 +1,19 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import logging
-from langchain_community.tools import ElevenLabsText2SpeechTool
-from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage  # Updated import
 import json
 from dotenv import load_dotenv
-from elevenlabs.client import ElevenLabs
-from elevenlabs import play
-import requests
+import httpx
+import base64
+import tempfile
+from openai import OpenAI
 
 load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
-
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -24,20 +22,15 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-
 logger = logging.getLogger(__name__)
 
-required_env_vars = ["ELEVEN_API_KEY", "OPENAI_API_KEY"]
+required_env_vars = ["OPENAI_API_KEY"]
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 app = FastAPI()
-
-client = ElevenLabs(api_key=os.getenv("ELEVEN_API_KEY"))
-
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -46,53 +39,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize AI components
-logger.info("Initializing AI components...")
-
-# Use ChatOpenAI instead of OpenAI
+# Initialize the conversational AI model
 llm = ChatOpenAI(
     model="gpt-4o-mini", 
     temperature=0.7,
     api_key=os.getenv("OPENAI_API_KEY")
 )
-tts = ElevenLabsText2SpeechTool(
-    api_key=os.getenv("ELEVEN_API_KEY")
-)
-
-# Create LangGraph agent with compatible model
-agent = create_react_agent(
-    model=llm,
-    tools=[tts],
-    messages_modifier="You are a Starkchan the zero-knowledge proofs waifu, a metaverse entertainer that knows a lot about ZKPs and Starknet, and can make witty replies. IMPORTANT: Keep it conversational, so make sure to only give short answers and make your output digestible for T2S! Example convo: User: 'I like your curves!' You:'Thanks they are eliptic!'"
-)
 
 logger.info("AI components initialized successfully")
-def text_to_speech(text, api_key):
-    url = "https://api.elevenlabs.io/v1/text-to-speech/21m00tcm4tlvdq8ikwam"  # Using a default voice ID
-    
-    headers = {
-        "xi-api-key": api_key,
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "text": text,
-        "voice_settings": {
-            "stability": 0.7,
-            "similarity_boost": 0.8
-        }
-    }
-    
-    response = requests.post(url, headers=headers, json=data)
-    
-    # Save the audio file
-    output_path = "output.mp3"
-    with open(output_path, "wb") as f:
-        f.write(response.content)
-    
-    return output_path
 
-# Update your websocket endpoint to use the new function:
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     logger.info("New WebSocket connection request received")
@@ -105,40 +60,66 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.info(f"Received message from client: {data}")
             message = json.loads(data)
             
-            # Generate AI response using LangGraph agent
+            # Generate AI response (fixed async call)
             logger.info("Generating AI response...")
-            response = agent.invoke({"messages": [("user", message["text"])]})
-            logger.info(f"AI response generated: {response}")
+            response = await llm.ainvoke([HumanMessage(content=message["text"])])  # Use ainvoke
+            message_content = response.content  # Direct access to content
+            logger.info(f"AI response generated: {message_content}")
             
-            # Get the last message content
-            ai_message = response["messages"][-1]
-            message_content = ai_message.content
+            # Convert text to speech
+            tts_url = "https://api.openai.com/v1/audio/speech"
+            headers = {
+                'Authorization': f'Bearer {os.getenv("OPENAI_API_KEY")}',
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'model': 'tts-1',
+                'voice': 'sage', 
+                'input': message_content
+            }
             
-            # Convert to speech using the new API
-            logger.info("Converting text to speech...")
-            audio_generator = client.text_to_speech.convert(
-                text=message_content,
-                voice_id="zrHiDhphv9ZnVXBqCLjz",
-                model_id="eleven_multilingual_v2"
-            )
-
-            # Save the audio file by consuming the generator
-            output_path = "output.mp3"
-            with open(output_path, "wb") as f:
-                for chunk in audio_generator:
-                    f.write(chunk)
-            
-            await websocket.send_json({
-                "type": "audio",
-                "path": output_path
-            })
-            logger.info("Audio file path sent to client")
-            
+            async with httpx.AsyncClient() as client:
+                tts_response = await client.post(tts_url, headers=headers, json=payload)
+                
+                # Stream audio chunks
+                async for chunk in tts_response.aiter_bytes():
+                    await websocket.send_bytes(chunk)
+                    logger.info("Sent audio chunk to client")
+                    
     except Exception as e:
         logger.error(f"Error in WebSocket connection: {str(e)}", exc_info=True)
     finally:
         logger.info("WebSocket connection closed")
 
+
+@app.post("/transcribe")
+async def transcribe_audio(data: dict):
+    try:
+        audio_bytes = base64.b64decode(data['audio'])
+        
+        # temp file with WAV extension
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio.flush()
+            
+            # Open as file-like object
+            with open(temp_audio.name, "rb") as audio_file:
+                transcription = client.audio.transcriptions.create(  # Remove await
+                    file=audio_file,
+                    model="whisper-1",
+                    response_format="text",
+                    temperature=0.2,
+                    prompt="ZKPs, Starknet, blockchain"
+                )
+        
+        if not transcription.strip():
+            raise HTTPException(400, "Empty transcription")
+            
+        return {"text": transcription.strip()}
+    
+    except Exception as e:
+        logger.error(f"Transcription error: {str(e)}") 
+        raise HTTPException(500, f"Audio processing failed: {str(e)}")
 
 
 if __name__ == "__main__":
