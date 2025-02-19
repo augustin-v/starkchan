@@ -74,7 +74,7 @@ async def websocket_endpoint(websocket: WebSocket):
             }
             payload = {
                 'model': 'tts-1',
-                'voice': 'sage', 
+                'voice': 'nova', 
                 'input': message_content
             }
             
